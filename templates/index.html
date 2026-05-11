@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>腾讯云 DDNS 管理</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  a { color: #60a5fa; text-decoration: none; }
+  a:hover { color: #93c5fd; }
+
+  /* 顶部导航 */
+  .navbar { background: #1e293b; border-bottom: 1px solid #334155; }
+  .navbar-inner { max-width: 900px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; height: 56px; }
+  .navbar .logo { font-size: 18px; font-weight: 700; color: #60a5fa; letter-spacing: 1px; flex-shrink: 0; }
+  .nav-links { display: flex; gap: 4px; margin-left: auto; }
+  .nav-links a { padding: 8px 16px; border-radius: 6px; color: #94a3b8; font-size: 14px; transition: all 0.15s; }
+  .nav-links a:hover { background: #334155; color: #e2e8f0; }
+  .nav-links a.active { background: #1d4ed8; color: #fff; }
+
+  /* 页面容器 */
+  .container { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+
+  /* 卡片 */
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+  .card-title { font-size: 16px; font-weight: 600; color: #e2e8f0; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 8px; }
+  .card-title .icon { font-size: 20px; }
+
+  /* 状态卡片行 */
+  .status-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+  .stat-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; text-align: center; }
+  .stat-card .label { font-size: 12px; color: #64748b; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-card .value { font-size: 22px; font-weight: 700; color: #f1f5f9; word-break: break-all; }
+  .stat-card .value.green { color: #4ade80; }
+  .stat-card .value.yellow { color: #facc15; }
+  .stat-card .value.red { color: #f87171; }
+
+  /* 按钮 */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.15s; }
+  .btn-primary { background: #2563eb; color: #fff; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-primary:disabled { background: #1e3a5f; color: #64748b; cursor: not-allowed; }
+  .btn-success { background: #16a34a; color: #fff; }
+  .btn-success:hover { background: #15803d; }
+  .btn-warning { background: #d97706; color: #fff; }
+  .btn-warning:hover { background: #b45309; }
+  .btn-ghost { background: transparent; color: #94a3b8; border: 1px solid #334155; }
+  .btn-ghost:hover { background: #334155; color: #e2e8f0; }
+  .btn-sm { padding: 6px 12px; font-size: 13px; }
+  .btn-lg { padding: 14px 28px; font-size: 16px; }
+  .btn-block { width: 100%; justify-content: center; }
+
+  /* 表单 */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group.full { grid-column: 1 / -1; }
+  .form-label { font-size: 13px; color: #94a3b8; font-weight: 500; }
+  .form-hint { font-size: 12px; color: #64748b; }
+  input, select { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px 12px; color: #e2e8f0; font-size: 14px; width: 100%; transition: border-color 0.15s; }
+  input:focus, select:focus { outline: none; border-color: #3b82f6; background: #1e293b; }
+  input::placeholder { color: #475569; }
+  input[readonly] { color: #64748b; cursor: default; }
+  input[type="password"] { font-family: monospace; letter-spacing: 2px; }
+
+  /* 日志 */
+  .log-box { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 16px; max-height: 400px; overflow-y: auto; font-family: "JetBrains Mono", "Fira Code", monospace; font-size: 13px; line-height: 1.8; }
+  .log-line { padding: 2px 0; }
+  .log-line.info { color: #94a3b8; }
+  .log-line.success { color: #4ade80; }
+  .log-line.error { color: #f87171; }
+  .log-line.warn { color: #facc15; }
+  .log-empty { color: #475569; text-align: center; padding: 40px; }
+
+  /* 表格 */
+  .table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .table th { text-align: left; padding: 10px 12px; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #334155; }
+  .table td { padding: 10px 12px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+  .table tr:hover td { background: #1e293b; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; background: #1e3a5f; color: #60a5fa; }
+  .tag.green { background: #14532d; color: #4ade80; }
+  .tag.red { background: #7f1d1d; color: #f87171; }
+  .tag.yellow { background: #713f12; color: #facc15; }
+
+  /* 消息 */
+  .alert { padding: 12px 16px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
+  .alert-success { background: #14532d; border: 1px solid #16a34a; color: #4ade80; }
+  .alert-error { background: #7f1d1d; border: 1px solid #dc2626; color: #f87171; }
+  .alert-info { background: #1e3a5f; border: 1px solid #2563eb; color: #60a5fa; }
+
+  /* 加载状态 */
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #334155; border-top-color: #60a5fa; border-radius: 50%; animation: spin 0.6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-overlay { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 20px; color: #60a5fa; }
+
+  /* 定时任务 */
+  .cron-cmd { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 12px 16px; font-family: monospace; font-size: 13px; color: #4ade80; word-break: break-all; margin: 8px 0; }
+
+  /* Tab 切换 */
+  .tab-nav { display: flex; gap: 4px; margin-bottom: 24px; }
+  .tab-nav .tab { padding: 8px 20px; border-radius: 6px; color: #64748b; font-size: 14px; cursor: pointer; border: none; background: none; transition: all 0.15s; }
+  .tab-nav .tab:hover { color: #94a3b8; }
+  .tab-nav .tab.active { background: #1e3a5f; color: #60a5fa; }
+
+  /* 结果展示 */
+  .result-box { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 16px; margin-top: 16px; font-size: 14px; }
+  .result-box.success { border-color: #16a34a; }
+  .result-box.error { border-color: #dc2626; }
+  .result-box .msg { color: #e2e8f0; margin-bottom: 8px; }
+  .result-box .detail { font-size: 13px; color: #64748b; }
+
+  .flex { display: flex; }
+  .gap-8 { gap: 8px; }
+  .gap-12 { gap: 12px; }
+  .items-center { align-items: center; }
+  .justify-between { justify-content: space-between; }
+  .mt-16 { margin-top: 16px; }
+  .mt-24 { margin-top: 24px; }
+  .mb-8 { margin-bottom: 8px; }
+  .text-sm { font-size: 13px; }
+  .text-muted { color: #64748b; }
+  .text-center { text-align: center; }
+  .font-mono { font-family: monospace; }
+</style>
+</head>
+<body>
+
+<!-- 导航栏 -->
+<nav class="navbar">
+  <div class="navbar-inner">
+    <div class="logo">☁️ 腾讯云 DDNS</div>
+    <div class="nav-links">
+      <a href="/" onclick="navigate('home');return false;">首页</a>
+      <a href="/config" onclick="navigate('config');return false;">配置</a>
+      <a href="/cron" onclick="navigate('cron');return false;">定时任务</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  {% if page == 'home' %}
+  <!-- 首页：状态总览 + 操作 -->
+  <div class="status-row" id="statusRow">
+    <div class="stat-card">
+      <div class="label">配置状态</div>
+      <div class="value" id="cfgStatus"><div class="spinner"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">当前公网 IP</div>
+      <div class="value" id="wanIp"><div class="spinner"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">解析记录 IP</div>
+      <div class="value" id="recordIp"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+  <!-- 快捷操作 -->
+  <div class="card">
+    <div class="card-title"><span class="icon">⚡</span> 快捷操作</div>
+    <div class="flex gap-8">
+      <button class="btn btn-success btn-lg" onclick="runDDNS()">▶ 立即更新 DDNS</button>
+      <button class="btn btn-ghost" onclick="queryRecord()">🔍 查询记录</button>
+      <button class="btn btn-ghost" onclick="refreshStatus()">🔄 刷新状态</button>
+    </div>
+    <div id="ddnsResult"></div>
+  </div>
+
+  <!-- 查询结果 -->
+  <div class="card" id="queryCard" style="display:none">
+    <div class="card-title"><span class="icon">🔍</span> 解析记录查询</div>
+    <div id="queryResult"></div>
+  </div>
+
+  <!-- 日志查看 -->
+  <div class="card">
+    <div class="card-title">
+      <span class="icon">📋</span> 运行日志
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn btn-sm btn-ghost" onclick="loadLogs()">🔄 刷新</button>
+        <select id="logCount" onchange="loadLogs()" style="width:auto;padding:4px 8px;font-size:12px">
+          <option value="50">最近50行</option>
+          <option value="100" selected>最近100行</option>
+          <option value="200">最近200行</option>
+          <option value="500">最近500行</option>
+        </select>
+      </div>
+    </div>
+    <div class="log-box" id="logBox">
+      <div class="log-empty"><div class="spinner" style="margin:0 auto"></div></div>
+    </div>
+  </div>
+
+  {% elif page == 'config' %}
+  <!-- 配置页面 -->
+  {% if saved %}
+  <div class="alert alert-success">✅ 配置已保存</div>
+  {% endif %}
+
+  <div class="card">
+    <div class="card-title"><span class="icon">⚙️</span> API 凭证</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">SecretId *</label>
+        <input type="text" name="SECRET_ID" value="{{ cfg.SECRET_ID }}" placeholder="AKIDxxxxxxxxxxxxxxxxx" autocomplete="off">
+        <span class="form-hint">腾讯云控制台 → 访问密钥 → API 密钥</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label">SecretKey *</label>
+        <input type="password" name="SECRET_KEY" value="{{ cfg.SECRET_KEY }}" placeholder="xxxxxxxxxxxxxxxx" autocomplete="new-password">
+      </div>
+      <div class="form-group full">
+        <label class="form-label">临时密钥 Token（可选）</label>
+        <input type="text" name="TOKEN" value="{{ cfg.TOKEN }}" placeholder="使用临时凭证时填写">
+        <span class="form-hint">通过 CAM 角色获取的临时凭证才需要填写</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="icon">🌐</span> 域名配置</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">主域名 *</label>
+        <input type="text" name="DOMAIN" value="{{ cfg.DOMAIN }}" placeholder="example.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">子域名 *</label>
+        <input type="text" name="SUBDOMAIN" value="{{ cfg.SUBDOMAIN }}" placeholder="home">
+      </div>
+      <div class="form-group">
+        <label class="form-label">记录类型</label>
+        <select name="RECORD_TYPE">
+          <option value="A" {% if cfg.RECORD_TYPE=='A' %}selected{% endif %}>A (IPv4)</option>
+          <option value="AAAA" {% if cfg.RECORD_TYPE=='AAAA' %}selected{% endif %}>AAAA (IPv6)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">解析线路</label>
+        <select name="RECORD_LINE">
+          <option value="默认" {% if cfg.RECORD_LINE=='默认' %}selected{% endif %}>默认</option>
+          <option value="电信" {% if cfg.RECORD_LINE=='电信' %}selected{% endif %}>电信</option>
+          <option value="联通" {% if cfg.RECORD_LINE=='联通' %}selected{% endif %}>联通</option>
+          <option value="移动" {% if cfg.RECORD_LINE=='移动' %}selected{% endif %}>移动</option>
+          <option value="教育网" {% if cfg.RECORD_LINE=='教育网' %}selected{% endif %}>教育网</option>
+        </select>
+      </div>
+      <div class="form-group full">
+        <label class="form-label">日志文件路径</label>
+        <input type="text" name="LOG_FILE" value="{{ cfg.LOG_FILE }}">
+      </div>
+    </div>
+    <div class="mt-24">
+      <button class="btn btn-primary btn-lg btn-block" onclick="saveConfig()">💾 保存配置</button>
+    </div>
+  </div>
+
+  <!-- 测试区域 -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🧪</span> 测试</div>
+    <div class="flex gap-8 mb-8">
+      <button class="btn btn-success" onclick="runDDNS()">▶ 执行 DDNS</button>
+      <button class="btn btn-ghost" onclick="queryRecord()">🔍 查询记录</button>
+      <button class="btn btn-ghost" onclick="testIP()">🌐 获取本机IP</button>
+    </div>
+    <div id="testResult"></div>
+  </div>
+
+  {% elif page == 'cron' %}
+  <!-- 定时任务页面 -->
+  <div class="card">
+    <div class="card-title"><span class="icon">⏰</span> 定时任务设置</div>
+    <p class="text-sm text-muted mb-8">Linux/macOS 使用 crontab，Windows 使用任务计划程序。</p>
+
+    <div class="alert alert-info">
+      <strong>配置路径：</strong> <span class="font-mono">{{ cfg.LOG_FILE }}</span><br>
+      如果日志路径没有写入权限，可以改为 <code class="font-mono">~/tencent_ddns.log</code>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="icon">🐧</span> Linux / macOS (crontab)</div>
+    <p class="text-sm text-muted mb-8">运行 <code>crontab -e</code> 编辑定时任务：</p>
+
+    <p class="mb-8 text-sm">每 5 分钟检查一次（推荐）：</p>
+    <div class="cron-cmd">*/5 * * * * /usr/bin/python3 /root/tencent_ddns_ui/app.py --port 8877 >> /var/log/tencent_ddns.log 2>&1</div>
+
+    <p class="mb-8 text-sm mt-16">每 10 分钟检查一次：</p>
+    <div class="cron-cmd">*/10 * * * * /usr/bin/python3 /root/tencent_ddns_ui/app.py --port 8877 >> /var/log/tencent_ddns.log 2>&1</div>
+
+    <p class="mb-8 text-sm mt-16">每小时检查一次：</p>
+    <div class="cron-cmd">0 * * * * /usr/bin/python3 /root/tencent_ddns_ui/app.py --port 8877 >> /var/log/tencent_ddns.log 2>&1</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="icon">🪟</span> Windows 任务计划程序</div>
+    <p class="text-sm text-muted mb-8">
+      创建基本任务，触发器设为"按预定时间"，操作选择"启动程序"：<br>
+      程序：<code>python</code><br>
+      参数：<code>"C:\path\to\tencent_ddns_ui\app.py" --port 8877</code><br>
+      起始位置：<code>C:\path\to\tencent_ddns_ui</code>
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="icon">🧩</span> systemd 服务 + 定时器（进阶）</div>
+    <p class="text-sm text-muted mb-8">创建 systemd 服务单元实现更可靠的后台运行：</p>
+    <p class="text-sm mb-8">1. 创建服务文件：<code>sudo nano /etc/systemd/system/tencent-ddns.service</code></p>
+    <div class="cron-cmd" style="white-space:pre">[Unit]
+Description=Tencent Cloud DDNS Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/python3 /root/tencent_ddns_ui/app.py --port 8877
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target</div>
+    <p class="text-sm mt-16 mb-8">2. 创建定时器：<code>sudo nano /etc/systemd/system/tencent-ddns.timer</code></p>
+    <div class="cron-cmd" style="white-space:pre">[Unit]
+Description=Tencent Cloud DDNS Timer (every 5 min)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Unit=tencent-ddns.service
+
+[Install]
+WantedBy=timers.target</div>
+    <p class="text-sm mt-16 mb-8">3. 启用并启动：</p>
+    <div class="cron-cmd">sudo systemctl daemon-reload
+sudo systemctl enable --now tencent-ddns.timer
+sudo systemctl status tencent-ddns.service</div>
+  </div>
+
+  {% endif %}
+</div>
+
+<script>
+let currentPage = '{{ page }}';
+
+function navigate(page) {
+  window.location.href = '/' + (page === 'home' ? '' : page);
+}
+
+// ===== 首页功能 =====
+
+async function refreshStatus() {
+  const cfg = document.getElementById('cfgStatus');
+  const wan = document.getElementById('wanIp');
+  const rec = document.getElementById('recordIp');
+  cfg.innerHTML = '<div class="spinner"></div>';
+  wan.innerHTML = '<div class="spinner"></div>';
+  rec.innerHTML = '<div class="spinner"></div>';
+
+  // 并行获取状态和公网IP
+  const [statusRes, ipRes] = await Promise.all([
+    fetch('/api/status'),
+    fetch('/api/ip')
+  ]);
+  const status = await statusRes.json();
+  const ipData = await ipRes.json();
+
+  if (status.configured) {
+    cfg.innerHTML = '<span class="green">已配置</span>';
+  } else {
+    cfg.innerHTML = '<span class="yellow">未配置</span><br><a href="/config" style="font-size:12px">去配置 →</a>';
+  }
+
+  wan.textContent = ipData.ip || '获取失败';
+
+  if (status.record_info && status.record_info.success) {
+    const records = status.record_info.records || [];
+    if (records.length > 0) {
+      const r = records[0];
+      rec.innerHTML = `<span class="${r.Value === ipData.ip ? 'green' : 'yellow'}">${r.Value}</span>
+        <div style="font-size:11px;color:#64748b;margin-top:2px">${r.RecordLine} / ${r.RecordType}</div>
+        <div style="font-size:11px;color:#475569;margin-top:2px">更新: ${r.Updated || '-'}</div>`;
+    } else {
+      rec.innerHTML = '<span class="red">无记录</span>';
+    }
+  } else {
+    rec.textContent = status.record_info && status.record_info.message ? '查询失败' : '未查询';
+  }
+}
+
+async function runDDNS() {
+  const el = document.getElementById('ddnsResult') || document.getElementById('testResult') || document.getElementById('ddnsResult');
+  el.innerHTML = '<div class="loading-overlay"><div class="spinner"></div>正在执行 DDNS 更新...</div>';
+  try {
+    const resp = await fetch('/api/run', { method: 'POST' });
+    const data = await resp.json();
+    if (data.success) {
+      el.innerHTML = `<div class="result-box success"><div class="msg">✅ ${data.message}</div>
+        <div class="detail">旧 IP: ${data.old_ip || '-'} → 新 IP: ${data.new_ip}</div></div>`;
+    } else {
+      el.innerHTML = `<div class="result-box error"><div class="msg">❌ ${data.message}</div>
+        ${data.new_ip ? `<div class="detail">当前公网 IP: ${data.new_ip}</div>` : ''}</div>`;
+    }
+  } catch (e) {
+    el.innerHTML = `<div class="alert alert-error">请求失败: ${e.message}</div>`;
+  }
+  refreshStatus();
+  loadLogs();
+}
+
+async function queryRecord() {
+  const el = document.getElementById('queryResult') || document.getElementById('testResult');
+  el.innerHTML = '<div class="loading-overlay"><div class="spinner"></div>正在查询...</div>';
+  try {
+    const resp = await fetch('/api/query');
+    const data = await resp.json();
+    const card = document.getElementById('queryCard');
+    if (card) card.style.display = 'block';
+
+    if (data.success && data.records && data.records.length > 0) {
+      const html = `<p class="text-sm text-muted mb-8">当前公网 IP：<strong>${data.current_wan_ip}</strong></p>
+        <table class="table">
+          <thead><tr><th>记录ID</th><th>类型</th><th>记录值</th><th>线路</th><th>TTL</th><th>状态</th></tr></thead>
+          <tbody>
+            ${data.records.map(r => `<tr>
+              <td class="font-mono" style="font-size:12px">${r.RecordId}</td>
+              <td><span class="tag">${r.RecordType}</span></td>
+              <td class="font-mono" style="color:#4ade80">${r.Value}</td>
+              <td style="color:#94a3b8">${r.RecordLine}</td>
+              <td style="color:#64748b">${r.TTL || '-'}</td>
+              <td><span class="tag ${r.Status==='Enable'?'green':'red'}">${r.Status}</span></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+      el.innerHTML = html;
+    } else {
+      el.innerHTML = `<div class="alert alert-info">${data.message || '未找到记录'}</div>`;
+    }
+  } catch (e) {
+    el.innerHTML = `<div class="alert alert-error">查询失败: ${e.message}</div>`;
+  }
+}
+
+async function loadLogs() {
+  const box = document.getElementById('logBox');
+  const count = document.getElementById('logCount')?.value || 100;
+  box.innerHTML = '<div class="log-empty"><div class="spinner" style="margin:0 auto"></div></div>';
+  try {
+    const resp = await fetch(`/api/logs?count=${count}`);
+    const data = await resp.json();
+    if (data.logs && data.logs.length > 0) {
+      box.innerHTML = data.logs.map(line => {
+        let cls = 'info';
+        if (line.includes('[ERROR]')) cls = 'error';
+        else if (line.includes('[INFO]')) cls = 'success';
+        else if (line.includes('[WARN]')) cls = 'warn';
+        return `<div class="log-line ${cls}">${escapeHtml(line)}</div>`;
+      }).join('');
+    } else {
+      box.innerHTML = '<div class="log-empty">暂无日志<br><span class="text-sm">执行 DDNS 后会有日志记录</span></div>';
+    }
+  } catch (e) {
+    box.innerHTML = `<div class="log-empty" style="color:#f87171">加载失败: ${e.message}</div>`;
+  }
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>');
+}
+
+// ===== 配置页面 =====
+async function saveConfig() {
+  const data = new URLSearchParams();
+  ['SECRET_ID','SECRET_KEY','TOKEN','DOMAIN','SUBDOMAIN','RECORD_TYPE','RECORD_LINE','LOG_FILE'].forEach(k => {
+    const el = document.querySelector(`[name="${k}"]`);
+    if (el) data.append(k, el.value);
+  });
+
+  const btn = document.querySelector('button[onclick="saveConfig()"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> 保存中...'; }
+
+  try {
+    const resp = await fetch('/config', { method: 'POST', body: data });
+    const json = await resp.json();
+    if (json.success) {
+      btn.innerHTML = '✅ 已保存';
+      setTimeout(() => { btn.innerHTML = '💾 保存配置'; btn.disabled = false; }, 1500);
+    } else {
+      btn.innerHTML = '💾 保存配置';
+      btn.disabled = false;
+      const el = document.getElementById('testResult') || document.createElement('div');
+      el.className = 'alert alert-error';
+      el.style.cssText = 'position:fixed;top:70px;right:20px;z-index:999;max-width:300px';
+      el.textContent = '保存失败: ' + (json.message || '');
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 3000);
+    }
+  } catch (e) {
+    btn.innerHTML = '💾 保存配置';
+    btn.disabled = false;
+    const el = document.createElement('div');
+    el.className = 'alert alert-error';
+    el.style.cssText = 'position:fixed;top:70px;right:20px;z-index:999;max-width:300px';
+    el.textContent = '保存失败: ' + e.message;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+  }
+}
+
+async function testIP() {
+  const el = document.getElementById('testResult');
+  el.innerHTML = '<div class="loading-overlay"><div class="spinner"></div>获取中...</div>';
+  const resp = await fetch('/api/ip');
+  const data = await resp.json();
+  el.innerHTML = `<div class="result-box success"><div class="msg">🌐 当前公网 IP：<strong>${data.ip}</strong></div></div>`;
+}
+
+// 页面初始化
+document.addEventListener('DOMContentLoaded', () => {
+  if (currentPage === 'home') {
+    refreshStatus();
+    loadLogs();
+    // 每 30 秒自动刷新日志
+    setInterval(loadLogs, 30000);
+  }
+  if (currentPage === 'config') {
+    // 检查URL参数
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('saved')) {
+      // 已通过 POST 重定向回来
+    }
+  }
+});
+</script>
+
+</body>
+</html>
