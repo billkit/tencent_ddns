@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import logging
+import threading
 from datetime import datetime
 
 sys.path.insert(0, '/root/.local/lib/python3.9/site-packages')
@@ -18,6 +19,9 @@ from flask import Flask, request, render_template, jsonify, redirect
 
 from tencentcloud.common import credential
 from tencentcloud.dnspod.v20210323 import dnspod_client, models
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 
 # =========================
 # 配置
@@ -36,7 +40,8 @@ def load_config():
     return {
         'SECRET_ID': '', 'SECRET_KEY': '', 'TOKEN': '',
         'DOMAIN': '', 'SUBDOMAIN': '', 'RECORD_TYPE': 'A',
-        'RECORD_LINE': '默认', 'LOG_FILE': LOG_FILE, 'REGION': 'ap-guangzhou'
+        'RECORD_LINE': '默认', 'LOG_FILE': LOG_FILE, 'REGION': 'ap-guangzhou',
+        'AUTO_INTERVAL': 10, 'AUTO_ENABLED': True
     }
 
 def write_log(cfg, message):
@@ -175,6 +180,100 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 # =========================
+# 自动定时查询（每 10 分钟）
+# =========================
+auto_query_cache = {
+    'last_run': None,
+    'result': None,
+    'running': False,
+    'next_run': None,
+    'interval': 10,
+    'enabled': True
+}
+_auto_query_lock = threading.Lock()
+
+def auto_ddns_job():
+    """后台定时任务：按间隔对比 IP 并自动更新 DDNS"""
+    cfg = load_config()
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with _auto_query_lock:
+        auto_query_cache['last_run'] = ts
+        auto_query_cache['running'] = True
+        auto_query_cache['interval'] = cfg.get('AUTO_INTERVAL', 10)
+        auto_query_cache['enabled'] = cfg.get('AUTO_ENABLED', True)
+
+    if not cfg['SECRET_ID'] or not cfg['DOMAIN']:
+        with _auto_query_lock:
+            auto_query_cache['result'] = {
+                'success': False, 'message': '未配置密钥或域名，跳过自动查询'
+            }
+            auto_query_cache['running'] = False
+        return
+
+    # 执行完整的 DDNS（对比 IP → 不一致则更新）
+    result = run_ddns(cfg)
+    write_log(cfg, f'[AUTO-DDNS] {result.get("message", "")}')
+    # 补充查询记录用于前端展示
+    query_result = query_record(cfg) if result.get('success') else None
+
+    with _auto_query_lock:
+        auto_query_cache['result'] = {
+            'ddns': result,
+            'query': query_result
+        }
+        auto_query_cache['running'] = False
+
+def reschedule_job(interval_minutes=None):
+    """热更新调度器间隔，interval_minutes 为 None 则从配置读取"""
+    cfg = load_config()
+    if interval_minutes is None:
+        interval_minutes = cfg.get('AUTO_INTERVAL', 10)
+    interval_minutes = int(interval_minutes)
+    if interval_minutes < 1:
+        interval_minutes = 1
+
+    enabled = cfg.get('AUTO_ENABLED', True)
+    with _auto_query_lock:
+        auto_query_cache['interval'] = interval_minutes
+        auto_query_cache['enabled'] = enabled
+
+    job_id = 'auto_ddns'
+    existing = scheduler.get_job(job_id)
+    if existing:
+        scheduler.remove_job(job_id)
+
+    if enabled:
+        scheduler.add_job(
+            auto_ddns_job,
+            trigger=IntervalTrigger(minutes=interval_minutes),
+            id=job_id,
+            name=f'每{interval_minutes}分钟自动DDNS',
+            replace_existing=True
+        )
+        write_log(cfg, f'[SCHEDULER] 调度器已更新: 每 {interval_minutes} 分钟执行一次')
+    else:
+        write_log(cfg, '[SCHEDULER] 自动DDNS已暂停')
+
+# =========================
+# 调度器
+# =========================
+scheduler = BackgroundScheduler(daemon=True)
+cfg_init = load_config()
+init_interval = cfg_init.get('AUTO_INTERVAL', 10)
+init_enabled = cfg_init.get('AUTO_ENABLED', True)
+with _auto_query_lock:
+    auto_query_cache['interval'] = init_interval
+    auto_query_cache['enabled'] = init_enabled
+
+if init_enabled:
+    scheduler.add_job(
+        auto_ddns_job,
+        trigger=IntervalTrigger(minutes=init_interval),
+        id='auto_ddns',
+        name=f'每{init_interval}分钟自动DDNS',
+        replace_existing=True
+    )
+# =========================
 # 路由
 # =========================
 @app.route('/')
@@ -237,6 +336,81 @@ def api_status():
         'record_info': result
     })
 
+@app.route('/api/auto-query-status')
+def api_auto_query_status():
+    """返回自动定时 DDNS 的状态和最近一次结果"""
+    with _auto_query_lock:
+        data = dict(auto_query_cache)
+    data['schedule_interval'] = f'{data.get("interval", 10)} 分钟'
+
+    # 计算下次执行时间
+    job = scheduler.get_job('auto_ddns')
+    if job and job.next_run_time:
+        data['next_run'] = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S')
+    elif data.get('next_run'):
+        pass  # keep existing
+    else:
+        data['next_run'] = '未调度'
+
+    # 同步当前配置值
+    cfg = load_config()
+    data['interval'] = cfg.get('AUTO_INTERVAL', 10)
+    data['enabled'] = cfg.get('AUTO_ENABLED', True)
+
+    return jsonify(data)
+
+
+# =========================
+# 定时任务管理 API
+# =========================
+@app.route('/api/cron/config', methods=['GET', 'POST'])
+def api_cron_config():
+    """获取或设置自动 DDNS 的间隔和启用状态"""
+    cfg = load_config()
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        interval = body.get('interval')
+        enabled = body.get('enabled')
+
+        if interval is not None:
+            interval = int(interval)
+            if interval < 1:
+                return jsonify({'success': False, 'message': '间隔不能小于 1 分钟'})
+            cfg['AUTO_INTERVAL'] = interval
+        if enabled is not None:
+            cfg['AUTO_ENABLED'] = bool(enabled)
+
+        save_config(cfg)
+        reschedule_job()
+
+        return jsonify({
+            'success': True,
+            'message': '定时任务配置已更新',
+            'interval': cfg.get('AUTO_INTERVAL', 10),
+            'enabled': cfg.get('AUTO_ENABLED', True)
+        })
+    else:
+        return jsonify({
+            'success': True,
+            'interval': cfg.get('AUTO_INTERVAL', 10),
+            'enabled': cfg.get('AUTO_ENABLED', True)
+        })
+
+@app.route('/api/cron/status')
+def api_cron_status():
+    """返回调度器运行状态"""
+    job = scheduler.get_job('auto_ddns')
+    cfg = load_config()
+    return jsonify({
+        'success': True,
+        'interval': cfg.get('AUTO_INTERVAL', 10),
+        'enabled': cfg.get('AUTO_ENABLED', True),
+        'running': auto_query_cache.get('running', False),
+        'last_run': auto_query_cache.get('last_run'),
+        'next_run': job.next_run_time.strftime('%Y-%m-%d %H:%M:%S') if (job and job.next_run_time) else '未调度',
+        'triggered_count': 0  # APScheduler doesn't track this easily
+    })
+
 @app.route('/cron')
 def cron_page():
     cfg = load_config()
@@ -248,5 +422,20 @@ if __name__ == '__main__':
     parser.add_argument('--port', '-p', type=int, default=APP_PORT)
     parser.add_argument('--host', default='0.0.0.0')
     args = parser.parse_args()
+
+    # 启动后台调度器
+    scheduler.start()
+
+    # 根据配置决定是否添加定时任务
+    if init_enabled:
+        scheduler.add_job(
+            auto_ddns_job,
+            id='auto_ddns_boot',
+            replace_existing=True
+        )
+        print(f'  自动 DDNS 调度器已启动（每 {init_interval} 分钟）')
+    else:
+        print('  自动 DDNS 调度器已禁用')
+
     print(f'\n  腾讯云 DDNS Web 管理界面\n  访问地址: http://0.0.0.0:{args.port}\n')
     app.run(host=args.host, port=args.port, debug=False, threaded=True)
