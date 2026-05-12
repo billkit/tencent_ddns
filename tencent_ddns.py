@@ -20,17 +20,45 @@ from tencentcloud.dnspod.v20210323 import dnspod_client, models
 from datetime import datetime
 
 # =========================
-# 配置区
+# 配置
 # =========================
-SECRET_ID = ""        # 必填
-SECRET_KEY = ""       # 必填
-TOKEN = ""            # 可选，临时密钥
-DOMAIN = "example.com"  # 主域名
-SUBDOMAIN = "home"      # 子域名
-RECORD_TYPE = "A"       # 记录类型
-RECORD_LINE = "默认"    # 解析线路
-LOG_FILE = "/var/log/tencent_ddns.log"
-REGION = "ap-guangzhou"  # DNSPod 固定
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+# 默认配置
+DEFAULTS = {
+    "SECRET_ID": "",
+    "SECRET_KEY": "",
+    "TOKEN": "",
+    "DOMAIN": "example.com",
+    "SUBDOMAIN": "home",
+    "RECORD_TYPE": "A",
+    "RECORD_LINE": "默认",
+    "LOG_FILE": "/var/log/tencent_ddns.log",
+    "REGION": "ap-guangzhou"
+}
+
+def load_config() -> dict:
+    """从 config.json 读取配置，缺失项用默认值"""
+    config = DEFAULTS.copy()
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                json_config = json.load(f)
+                config.update(json_config)
+        except Exception as e:
+            print(f"[WARN] 读取 config.json 失败: {e}，使用默认配置", file=sys.stderr)
+    return config
+
+cfg = load_config()
+SECRET_ID = cfg["SECRET_ID"]
+SECRET_KEY = cfg["SECRET_KEY"]
+TOKEN = cfg["TOKEN"]
+DOMAIN = cfg["DOMAIN"]
+SUBDOMAIN = cfg["SUBDOMAIN"]
+RECORD_TYPE = cfg["RECORD_TYPE"]
+RECORD_LINE = cfg["RECORD_LINE"]
+LOG_FILE = cfg["LOG_FILE"]
+REGION = cfg["REGION"]
 
 # =========================
 # 工具函数
