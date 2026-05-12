@@ -265,14 +265,7 @@ with _auto_query_lock:
     auto_query_cache['interval'] = init_interval
     auto_query_cache['enabled'] = init_enabled
 
-if init_enabled:
-    scheduler.add_job(
-        auto_ddns_job,
-        trigger=IntervalTrigger(minutes=init_interval),
-        id='auto_ddns',
-        name=f'每{init_interval}分钟自动DDNS',
-        replace_existing=True
-    )
+# 不在模块级别创建任务，统一由 reschedule_job() 管理
 # =========================
 # 路由
 # =========================
@@ -425,14 +418,10 @@ if __name__ == '__main__':
 
     # 启动后台调度器
     scheduler.start()
+    # 统一用 reschedule_job 管理任务（避免重复创建）
+    reschedule_job()
 
-    # 根据配置决定是否添加定时任务
     if init_enabled:
-        scheduler.add_job(
-            auto_ddns_job,
-            id='auto_ddns_boot',
-            replace_existing=True
-        )
         print(f'  自动 DDNS 调度器已启动（每 {init_interval} 分钟）')
     else:
         print('  自动 DDNS 调度器已禁用')
